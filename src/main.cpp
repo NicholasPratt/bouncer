@@ -1005,11 +1005,18 @@ int main(int argc, char* argv[]) {
                     // Vertical bounce from energy
                     ball.vy = -(BASKETBALL_BASE_UP + ball.energy * BASKETBALL_UP_PER_ENERGY);
 
-                    // Sideways movement only influenced while touching:
+                    // Sideways movement only influenced while touching AND only when the ball is on the facing side.
                     // low energy -> match player, high energy -> exceed player.
-                    float mult = BASKETBALL_VX_MULT_BASE + ball.energy * BASKETBALL_VX_MULT_PER_ENERGY;
-                    mult = clampf(mult, 0.0f, BASKETBALL_VX_MULT_MAX);
-                    ball.vx = playerDX * mult;
+                    float offset = (ball.x - playerCenterX) / (PLAYER_SIZE * 0.5f); // -1..+1
+                    offset = clampf(offset, -1.0f, 1.0f);
+
+                    if (facing != 0 && (offset * (float)facing) > 0.10f) {
+                        float mult = BASKETBALL_VX_MULT_BASE + ball.energy * BASKETBALL_VX_MULT_PER_ENERGY;
+                        mult = clampf(mult, 0.0f, BASKETBALL_VX_MULT_MAX);
+                        ball.vx = playerDX * mult;
+                    } else {
+                        ball.vx = 0.0f;
+                    }
                 } else {
                     // Soccer-style contact behavior:
                     // - Ball pops upward
