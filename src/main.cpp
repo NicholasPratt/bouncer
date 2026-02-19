@@ -30,13 +30,24 @@ struct Basket {
 };
 
 // Ball physics (simple circle).
+enum BallKind {
+    BALL_SOCCER,
+    BALL_BASKETBALL
+};
+
 struct Ball {
+    BallKind kind = BALL_SOCCER;
+
     float x = 0.0f;
     float y = 0.0f;
     float vx = 0.0f;
     float vy = 0.0f;
     float radius = 18.0f;
     bool active = true;
+
+    // Basketball-specific state
+    int energy = 0;          // increases when player bounces "on" it
+    bool shooting = false;   // if true, ball is in a shot arc
 };
 
 const int SCREEN_WIDTH = 1280;
@@ -56,13 +67,26 @@ const float BALL_FRICTION_GROUND = 0.92f; // strong sideways damping when touchi
 const float BALL_AIR_DRAG = 0.995f;       // gentle sideways damping in air
 
 // Player->ball interaction
-const float BALL_PADDLE_MIN_UP = 6.5f;    // minimum upward bounce speed when hit by player
-const float BALL_DRIBBLE_SPEED = 7.0f;    // horizontal speed imparted when dribbling forward
-const float BALL_NEAR_BOUNCE_GAP = 10.0f; // "bounce next to" distance (px gap from ball to player)
+const float BALL_PADDLE_MIN_UP = 6.5f;     // minimum upward bounce speed when hit by player
+const float BALL_DRIBBLE_SPEED = 7.0f;     // horizontal speed imparted when dribbling forward
+const float BALL_NEAR_BOUNCE_GAP = 10.0f;  // "bounce next to" distance (px gap from ball to player)
 
 // Safety clamps (prevents ball from rocketing off-screen)
 const float BALL_MAX_VX = 14.0f;
 const float BALL_MAX_VY = 26.0f;
+
+// Basketball tuning
+const int   BASKETBALL_MAX_ENERGY = 12;
+const float BASKETBALL_BASE_UP = 6.0f;
+const float BASKETBALL_UP_PER_ENERGY = 1.15f;
+const float BASKETBALL_FOLLOW_STIFFNESS = 0.55f; // how strongly ball follows player when "dribbling"
+
+// Shot tuning (E key): arc distance depends on energy
+const float SHOT_VY_BASE = 14.0f;
+const float SHOT_VY_PER_ENERGY = 0.6f;
+const float SHOT_VX_HALF_SCREEN_AT = 6;  // energy at which shot is ~half-screen
+const float SHOT_VX_FULL_SCREEN_AT = 11; // energy at which shot is ~full-screen
+const float SHOT_VX_MAX = 18.0f;
 
 const float DOWNWARD_FORCE = 3.0f;   // Force added when pressing space while falling
 const float BOUNCE_LEVEL0 = -3.0f;   // Small rebound when failed
@@ -111,6 +135,7 @@ int main(int argc, char* argv[]) {
 
     // Ball
     Ball ball;
+    ball.kind = BALL_SOCCER;
     ball.x = playerX + PLAYER_SIZE + 20.0f;
     ball.y = playerY + PLAYER_SIZE - 40.0f;
     ball.vx = 0.0f;
@@ -320,6 +345,20 @@ int main(int argc, char* argv[]) {
                     editorMode = !editorMode;
                     std::cout << "Editor mode: " << (editorMode ? "ON" : "OFF") << std::endl;
                 }
+                else if (!editorMode && event.key.keysym.sym == SDLK_TAB) {
+                    // Toggle between soccer ball and basketball modes
+                    if (ball.kind == BALL_SOCCER) {
+                        ball.kind = BALL_BASKETBALL;
+                        ball.energy = 0;
+                        ball.shooting = false;
+                        std::cout << "Ball mode: BASKETBALL" << std::endl;
+                    } else {
+                        ball.kind = BALL_SOCCER;
+                        ball.energy = 0;
+                        ball.shooting = false;
+                        std::cout << "Ball mode: SOCCER" << std::endl;
+                    }
+                }
                 // Editor tool selection
                 else if (editorMode) {
                     if (event.key.keysym.sym == SDLK_1) {
@@ -422,6 +461,42 @@ int main(int argc, char* argv[]) {
                             std::cout << "Level loaded from level.txt" << std::endl;
                         } else {
                             std::cout << "Could not open level.txt" << std::endl;
+                        }
+                    }
+                }
+                else if (!editorMode && event.key.keysym.sym == SDLK_e) {
+                    // Shoot attempt (basketball only): if player & ball are touching and both are in the air,
+                    // launch the ball in an arc towards facing direction.
+                    if (ball.kind == BALL_BASKETBALL) {
+                        SDL_Rect playerRect = {(int)playerX, (int)playerY, PLAYER_SIZE, PLAYER_SIZE};
+                        float closestX = clampf(ball.x, (float)playerRect.x, (float)(playerRect.x + playerRect.w));
+                        float closestY = clampf(ball.y, (float)playerRect.y, (float)(playerRect.y + playerRect.h));
+                        float dx = ball.x - closestX;
+                        float dy = ball.y - closestY;
+                        float dist2 = dx*dx + dy*dy;
+                        bool touching = dist2 <= (ball.radius * ball.radius);
+
+                        float ballGroundY = WORLD_HEIGHT - GROUND_HEIGHT - ball.radius;
+                        bool ballInAir = ball.y < ballGroundY - 0.5f;
+                        bool playerInAir = !isGrounded;
+
+                        if (touching && ballInAir && playerInAir) {
+                            int facing = 0;
+                            if (faceOffset < 0) facing = -1;
+                            else if (faceOffset > 0) facing = 1;
+                            else facing = 1; // default to right
+
+                            float e = (float)ball.energy;
+                            // Map energy to a shot horizontal speed:
+                            // medium energy (~SHOT_VX_HALF_SCREEN_AT) => ~half screen
+                            // high energy (~SHOT_VX_FULL_SCREEN_AT) => ~full screen
+                            float t = (e - SHOT_VX_HALF_SCREEN_AT) / (SHOT_VX_FULL_SCREEN_AT - SHOT_VX_HALF_SCREEN_AT);
+                            t = clampf(t, 0.0f, 1.0f);
+                            float vx = (8.0f + t * (SHOT_VX_MAX - 8.0f));
+
+                            ball.shooting = true;
+                            ball.vx = (float)facing * vx;
+                            ball.vy = -(SHOT_VY_BASE + e * SHOT_VY_PER_ENERGY);
                         }
                     }
                 }
@@ -825,9 +900,20 @@ int main(int argc, char* argv[]) {
             // Gravity
             ball.vy += BALL_GRAVITY;
 
-            // Sideways damping (keeps the game feeling more "vertical")
-            ball.vx *= BALL_AIR_DRAG;
-            if (std::abs(ball.vx) < 0.001f) ball.vx = 0.0f;
+            // Basketball: when not shooting, the ball mostly "stays with" the player and gains vertical energy
+            // when the player bounces down next to it.
+            if (ball.kind == BALL_BASKETBALL && !ball.shooting) {
+                // Strongly damp sideways motion
+                ball.vx = 0.0f;
+
+                // Follow player horizontally (keeps it under/near the player unless a shot happens)
+                float targetX = playerX + PLAYER_SIZE * 0.5f;
+                ball.x = ball.x + (targetX - ball.x) * BASKETBALL_FOLLOW_STIFFNESS;
+            } else {
+                // Sideways damping (keeps the game feeling more "vertical")
+                ball.vx *= BALL_AIR_DRAG;
+                if (std::abs(ball.vx) < 0.001f) ball.vx = 0.0f;
+            }
 
             // Clamp speeds
             ball.vx = clampf(ball.vx, -BALL_MAX_VX, BALL_MAX_VX);
@@ -858,6 +944,11 @@ int main(int argc, char* argv[]) {
                 if (ball.vy > 0) ball.vy = -ball.vy * BALL_RESTITUTION;
                 ball.vx *= BALL_FRICTION_GROUND;
                 if (std::abs(ball.vy) < 0.2f) ball.vy = 0.0f;
+
+                // End shot when it hits the ground
+                if (ball.kind == BALL_BASKETBALL) {
+                    ball.shooting = false;
+                }
             }
 
             // Collide with platforms (treat platform as rect)
@@ -882,24 +973,33 @@ int main(int argc, char* argv[]) {
 
             bool hitPlayer = resolveCircleRect(ball, playerRect, 0.82f);
             if (hitPlayer) {
-                // Contact-only behavior:
-                // - Ball always pops upward
-                // - Horizontal "dribble" only happens if the ball is on the facing side.
-                float offset = (ball.x - playerCenterX) / (PLAYER_SIZE * 0.5f); // -1..+1
-                offset = clampf(offset, -1.0f, 1.0f);
-
-                // Upward bounce, preserving some incoming energy
-                float up = std::max(BALL_PADDLE_MIN_UP, std::abs(ball.vy));
-                ball.vy = -up;
-
-                // Dribble forward only if ball is on facing side (like needing to be on the correct side)
-                if (facing != 0 && (offset * (float)facing) > 0.15f) {
-                    ball.vx = (float)facing * (BALL_DRIBBLE_SPEED * std::abs(offset)) + playerDX * 0.4f;
-                } else {
-                    // Otherwise: straight up/down feel
+                if (ball.kind == BALL_BASKETBALL && !ball.shooting) {
+                    // Basketball: stick with player (no sideways launch) and convert energy into vertical bounce.
+                    if (bouncedThisFrame) {
+                        ball.energy = std::min(BASKETBALL_MAX_ENERGY, ball.energy + 1);
+                    }
                     ball.vx = 0.0f;
+                    ball.vy = -(BASKETBALL_BASE_UP + ball.energy * BASKETBALL_UP_PER_ENERGY);
+                } else {
+                    // Soccer-style contact behavior:
+                    // - Ball pops upward
+                    // - Horizontal "dribble" only happens if the ball is on the facing side.
+                    float offset = (ball.x - playerCenterX) / (PLAYER_SIZE * 0.5f); // -1..+1
+                    offset = clampf(offset, -1.0f, 1.0f);
+
+                    // Upward bounce, preserving some incoming energy
+                    float up = std::max(BALL_PADDLE_MIN_UP, std::abs(ball.vy));
+                    ball.vy = -up;
+
+                    // Dribble forward only if ball is on facing side (like needing to be on the correct side)
+                    if (facing != 0 && (offset * (float)facing) > 0.15f) {
+                        ball.vx = (float)facing * (BALL_DRIBBLE_SPEED * std::abs(offset)) + playerDX * 0.4f;
+                    } else {
+                        // Otherwise: straight up/down feel
+                        ball.vx = 0.0f;
+                    }
                 }
-            } else {
+            } else { 
                 // "Bounce next to" (within BALL_NEAR_BOUNCE_GAP px of contact) when the player bounces this frame.
                 // Detect distance from ball to player rect.
                 float closestX = clampf(ball.x, (float)playerRect.x, (float)(playerRect.x + playerRect.w));
@@ -910,9 +1010,17 @@ int main(int argc, char* argv[]) {
                 float gap = dist - ball.radius;
 
                 if (bouncedThisFrame && gap > 0.0f && gap <= BALL_NEAR_BOUNCE_GAP) {
-                    ball.vx = 0.0f;
-                    float up = std::max(BALL_PADDLE_MIN_UP, std::abs(ball.vy));
-                    ball.vy = -up;
+                    if (ball.kind == BALL_BASKETBALL) {
+                        // Basketball: each successful "bounce down" increases energy -> higher vertical bounce.
+                        ball.energy = std::min(BASKETBALL_MAX_ENERGY, ball.energy + 1);
+                        ball.vx = 0.0f;
+                        ball.vy = -(BASKETBALL_BASE_UP + ball.energy * BASKETBALL_UP_PER_ENERGY);
+                    } else {
+                        // Soccer-style: pop straight up
+                        ball.vx = 0.0f;
+                        float up = std::max(BALL_PADDLE_MIN_UP, std::abs(ball.vy));
+                        ball.vy = -up;
+                    }
                 }
             }
 
@@ -1202,7 +1310,14 @@ int main(int argc, char* argv[]) {
 
         // Draw ball
         if (!editorMode && ball.active) {
-            SDL_SetRenderDrawColor(renderer, 220, 70, 30, 255);
+            if (ball.kind == BALL_SOCCER) {
+                // Soccer ball: blue
+                SDL_SetRenderDrawColor(renderer, 50, 120, 255, 255);
+            } else {
+                // Basketball: orange
+                SDL_SetRenderDrawColor(renderer, 235, 120, 25, 255);
+            }
+
             int cx = (int)(ball.x - cameraX);
             int cy = (int)(ball.y - cameraY);
             int r = (int)ball.radius;
