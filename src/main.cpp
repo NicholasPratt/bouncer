@@ -903,15 +903,11 @@ int main(int argc, char* argv[]) {
             // Gravity
             ball.vy += BALL_GRAVITY;
 
-            // Basketball: when not shooting, the ball mostly "stays with" the player and gains vertical energy
-            // when the player bounces down next to it.
+            // Basketball: keep sideways motion heavily damped, but do NOT glue it to the player.
+            // The player can only affect sideways motion when actually touching the ball.
             if (ball.kind == BALL_BASKETBALL && !ball.shooting) {
-                // Strongly damp sideways motion
-                ball.vx = 0.0f;
-
-                // Follow player horizontally (keeps it under/near the player unless a shot happens)
-                float targetX = playerX + PLAYER_SIZE * 0.5f;
-                ball.x = ball.x + (targetX - ball.x) * BASKETBALL_FOLLOW_STIFFNESS;
+                ball.vx *= 0.90f;
+                if (std::abs(ball.vx) < 0.01f) ball.vx = 0.0f;
             } else {
                 // Sideways damping (keeps the game feeling more "vertical")
                 ball.vx *= BALL_AIR_DRAG;
