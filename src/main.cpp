@@ -79,7 +79,10 @@ const float BALL_MAX_VY = 26.0f;
 const int   BASKETBALL_MAX_ENERGY = 12;
 const float BASKETBALL_BASE_UP = 6.0f;
 const float BASKETBALL_UP_PER_ENERGY = 1.15f;
-const float BASKETBALL_FOLLOW_STIFFNESS = 0.55f; // how strongly ball follows player when "dribbling"
+// Basketball horizontal control
+const float BASKETBALL_VX_MULT_BASE = 1.0f;     // at low energy, match player sideways movement
+const float BASKETBALL_VX_MULT_PER_ENERGY = 0.12f; // at higher energy, exceed player movement
+const float BASKETBALL_VX_MULT_MAX = 2.6f;
 
 // Shot tuning (E key): arc distance depends on energy
 const float SHOT_VY_BASE = 14.0f;
@@ -989,12 +992,19 @@ int main(int argc, char* argv[]) {
             bool hitPlayer = resolveCircleRect(ball, playerRect, 0.82f);
             if (hitPlayer) {
                 if (ball.kind == BALL_BASKETBALL && !ball.shooting) {
-                    // Basketball: stick with player (no sideways launch) and convert energy into vertical bounce.
+                    // Basketball: vertical energy increases with successful bounce-downs.
                     if (bouncedThisFrame) {
                         ball.energy = std::min(BASKETBALL_MAX_ENERGY, ball.energy + 1);
                     }
-                    ball.vx = 0.0f;
+
+                    // Vertical bounce from energy
                     ball.vy = -(BASKETBALL_BASE_UP + ball.energy * BASKETBALL_UP_PER_ENERGY);
+
+                    // Sideways movement only influenced while touching:
+                    // low energy -> match player, high energy -> exceed player.
+                    float mult = BASKETBALL_VX_MULT_BASE + ball.energy * BASKETBALL_VX_MULT_PER_ENERGY;
+                    mult = clampf(mult, 0.0f, BASKETBALL_VX_MULT_MAX);
+                    ball.vx = playerDX * mult;
                 } else {
                     // Soccer-style contact behavior:
                     // - Ball pops upward
