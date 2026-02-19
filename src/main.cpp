@@ -51,8 +51,13 @@ const float MOVE_SPEED = 5.0f;
 
 // Ball tuning
 const float BALL_GRAVITY = 0.5f;
-const float BALL_RESTITUTION = 0.72f;  // bounce strength
-const float BALL_FRICTION = 0.985f;    // horizontal damping
+const float BALL_RESTITUTION = 0.72f;   // bounce strength
+const float BALL_FRICTION_GROUND = 0.92f; // strong sideways damping when touching ground
+const float BALL_AIR_DRAG = 0.995f;       // gentle sideways damping in air
+
+// Player->ball "paddle" effect (Pong/Arkanoid-ish)
+const float BALL_PADDLE_X = 8.5f;        // how much side impulse you get from edge hits
+const float BALL_PADDLE_MIN_UP = 6.5f;   // minimum upward bounce speed when hit by player
 
 const float DOWNWARD_FORCE = 3.0f;   // Force added when pressing space while falling
 const float BOUNCE_LEVEL0 = -3.0f;   // Small rebound when failed
@@ -815,6 +820,10 @@ int main(int argc, char* argv[]) {
             // Gravity
             ball.vy += BALL_GRAVITY;
 
+            // Sideways damping (keeps the game feeling more "vertical")
+            ball.vx *= BALL_AIR_DRAG;
+            if (std::abs(ball.vx) < 0.001f) ball.vx = 0.0f;
+
             // Integrate
             ball.x += ball.vx;
             ball.y += ball.vy;
@@ -838,7 +847,7 @@ int main(int argc, char* argv[]) {
             if (ball.y > ballGroundY) {
                 ball.y = ballGroundY;
                 if (ball.vy > 0) ball.vy = -ball.vy * BALL_RESTITUTION;
-                ball.vx *= BALL_FRICTION;
+                ball.vx *= BALL_FRICTION_GROUND;
                 if (std::abs(ball.vy) < 0.2f) ball.vy = 0.0f;
             }
 
@@ -852,13 +861,19 @@ int main(int argc, char* argv[]) {
 
             // Collide with player (rect)
             SDL_Rect playerRect = {(int)playerX, (int)playerY, PLAYER_SIZE, PLAYER_SIZE};
-            // Give the ball a bit of extra "kick" based on player horizontal movement
-            float oldVx = ball.vx;
             if (resolveCircleRect(ball, playerRect, 0.82f)) {
+                // Arkanoid/Pong style: where you hit the ball changes its horizontal angle.
+                float playerCenterX = playerX + PLAYER_SIZE * 0.5f;
+                float offset = (ball.x - playerCenterX) / (PLAYER_SIZE * 0.5f); // -1..+1
+                offset = clampf(offset, -1.0f, 1.0f);
+
+                // Side impulse based on hit offset, plus a bit from player movement
                 float playerDX = playerX - lastPlayerX;
-                ball.vx += playerDX * 0.35f;
-                // stop endless jittering
-                if (std::abs(ball.vx) < 0.02f) ball.vx = 0.0f;
+                ball.vx = offset * BALL_PADDLE_X + playerDX * 0.55f;
+
+                // Ensure the collision gives an upward bounce (feels like dribbling / volleying)
+                float up = std::max(BALL_PADDLE_MIN_UP, std::abs(ball.vy));
+                ball.vy = -up;
             }
 
             // Basket scoring: if ball center enters basket rect, reset ball and print a message.
