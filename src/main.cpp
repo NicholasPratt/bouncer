@@ -1390,6 +1390,9 @@ int main(int argc, char* argv[]) {
         // Update screen
         SDL_RenderPresent(renderer);
 
+        // Save last player position for next frame (used for ball interaction)
+        lastPlayerX = playerX;
+
         // Add a small delay to prevent high CPU usage
         SDL_Delay(16); // ~60 FPS
     }
