@@ -276,6 +276,21 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // Simple HUD text helper
+    auto drawText = [&](int x, int y, const std::string& text, SDL_Color color) {
+        SDL_Surface* textSurface = TTF_RenderText_Blended(font, text.c_str(), color);
+        if (!textSurface) return;
+        SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
+        if (!textTexture) {
+            SDL_FreeSurface(textSurface);
+            return;
+        }
+        SDL_Rect dst = {x, y, textSurface->w, textSurface->h};
+        SDL_RenderCopy(renderer, textTexture, nullptr, &dst);
+        SDL_DestroyTexture(textTexture);
+        SDL_FreeSurface(textSurface);
+    };
+
     // Load level from file on startup
     std::ifstream levelFile("level.txt");
     if (levelFile.is_open()) {
@@ -1102,6 +1117,21 @@ int main(int argc, char* argv[]) {
                 SDL_SetRenderDrawColor(renderer, 100, 150, 255, 255); // Blue for fall-through
             }
             SDL_RenderFillRect(renderer, &screenRect);
+        }
+
+        // HUD (always, even in editor)
+        {
+            SDL_Color hudColor{220, 220, 220, 255};
+            const char* modeName = (ball.kind == BALL_BASKETBALL) ? "BASKETBALL" : "SOCCER";
+            std::ostringstream hud;
+            hud << "Ball: " << modeName;
+            if (ball.kind == BALL_BASKETBALL) {
+                hud << "  energy:" << ball.energy;
+                if (ball.shooting) hud << "  (shooting)";
+            }
+            hud << "  pos:" << (int)ball.x << "," << (int)ball.y;
+            hud << "  vel:" << (int)ball.vx << "," << (int)ball.vy;
+            drawText(18, 18, hud.str(), hudColor);
         }
 
         // Draw editor UI
