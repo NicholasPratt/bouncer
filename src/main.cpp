@@ -14,13 +14,29 @@ enum EditorTool {
     TOOL_PLATFORM_FALLTHROUGH,
     TOOL_START,
     TOOL_FINISH,
-    TOOL_DELETE
+    TOOL_DELETE,
+    TOOL_BASKET
 };
 
 // Platform struct with type
 struct Platform {
     SDL_Rect rect;
     bool isSolid; // true = solid, false = fall-through
+};
+
+// Basket target (simple rectangle). You can treat this as the "hoop" area.
+struct Basket {
+    SDL_Rect rect;
+};
+
+// Ball physics (simple circle).
+struct Ball {
+    float x = 0.0f;
+    float y = 0.0f;
+    float vx = 0.0f;
+    float vy = 0.0f;
+    float radius = 18.0f;
+    bool active = true;
 };
 
 const int SCREEN_WIDTH = 1280;
@@ -32,6 +48,12 @@ const int PLAYER_SIZE = 64;
 const int GRID_SIZE = 32;  // Grid snap size
 const float GRAVITY = 0.5f;
 const float MOVE_SPEED = 5.0f;
+
+// Ball tuning
+const float BALL_GRAVITY = 0.5f;
+const float BALL_RESTITUTION = 0.72f;  // bounce strength
+const float BALL_FRICTION = 0.985f;    // horizontal damping
+
 const float DOWNWARD_FORCE = 3.0f;   // Force added when pressing space while falling
 const float BOUNCE_LEVEL0 = -3.0f;   // Small rebound when failed
 const float BOUNCE_LEVEL1 = -10.0f;  // First height
@@ -73,6 +95,16 @@ int main(int argc, char* argv[]) {
 
     // Create platforms (now using vector with type)
     std::vector<Platform> platforms;
+
+    // Baskets (targets)
+    std::vector<Basket> baskets;
+
+    // Ball
+    Ball ball;
+    ball.x = playerX + PLAYER_SIZE + 20.0f;
+    ball.y = playerY + PLAYER_SIZE - 40.0f;
+    ball.vx = 0.0f;
+    ball.vy = 0.0f;
 
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -123,6 +155,54 @@ int main(int argc, char* argv[]) {
         SDL_Quit();
         return 1;
     }
+
+
+    // Helpers
+    auto clampf = [](float v, float lo, float hi) {
+        return std::max(lo, std::min(v, hi));
+    };
+
+    auto resolveCircleRect = [&](Ball& c, const SDL_Rect& r, float restitution) {
+        // Find closest point on rect to circle center
+        float closestX = clampf(c.x, (float)r.x, (float)(r.x + r.w));
+        float closestY = clampf(c.y, (float)r.y, (float)(r.y + r.h));
+        float dx = c.x - closestX;
+        float dy = c.y - closestY;
+        float dist2 = dx*dx + dy*dy;
+        float rad2 = c.radius * c.radius;
+        if (dist2 >= rad2) return false;
+
+        // Push out along the smallest penetration axis (fallback if exactly centered)
+        if (dist2 == 0.0f) {
+            // choose an axis based on which side is closer
+            float left = std::abs(c.x - r.x);
+            float right = std::abs((r.x + r.w) - c.x);
+            float top = std::abs(c.y - r.y);
+            float bottom = std::abs((r.y + r.h) - c.y);
+            float m = std::min(std::min(left, right), std::min(top, bottom));
+            if (m == left) dx = -1, dy = 0;
+            else if (m == right) dx = 1, dy = 0;
+            else if (m == top) dx = 0, dy = -1;
+            else dx = 0, dy = 1;
+            dist2 = 1.0f;
+        }
+
+        float dist = std::sqrt(dist2);
+        float nx = dx / dist;
+        float ny = dy / dist;
+        float penetration = c.radius - dist;
+
+        c.x += nx * penetration;
+        c.y += ny * penetration;
+
+        // Reflect velocity along normal
+        float vn = c.vx * nx + c.vy * ny;
+        if (vn < 0.0f) {
+            c.vx -= (1.0f + restitution) * vn * nx;
+            c.vy -= (1.0f + restitution) * vn * ny;
+        }
+        return true;
+    };
 
     // Load ground texture (use project-relative path)
     groundTexture = IMG_LoadTexture(renderer, "assets/ground.png");
@@ -176,6 +256,21 @@ int main(int argc, char* argv[]) {
             levelFile >> p.rect.x >> p.rect.y >> p.rect.w >> p.rect.h >> p.isSolid;
             platforms.push_back(p);
         }
+        
+        // Load baskets (optional for backward compatibility)
+        size_t numBaskets = 0;
+        if (levelFile >> numBaskets) {
+            baskets.clear();
+            for (size_t i = 0; i < numBaskets; i++) {
+                Basket b;
+                levelFile >> b.rect.x >> b.rect.y >> b.rect.w >> b.rect.h;
+                baskets.push_back(b);
+            }
+        } else {
+            // Old level format: no baskets
+            levelFile.clear();
+        }
+
         levelFile.close();
         std::cout << "Level loaded from level.txt (" << platforms.size() << " platforms)" << std::endl;
 
@@ -237,6 +332,10 @@ int main(int argc, char* argv[]) {
                         currentTool = TOOL_DELETE;
                         std::cout << "Tool: Delete" << std::endl;
                     }
+                    else if (event.key.keysym.sym == SDLK_6) {
+                        currentTool = TOOL_BASKET;
+                        std::cout << "Tool: Basket" << std::endl;
+                    }
                     // Camera controls in editor
                     else if (event.key.keysym.sym == SDLK_LEFT) {
                         cameraX -= SCREEN_WIDTH / 2;
@@ -267,6 +366,13 @@ int main(int argc, char* argv[]) {
                             for (const auto& p : platforms) {
                                 file << p.rect.x << " " << p.rect.y << " " << p.rect.w << " " << p.rect.h << " " << p.isSolid << "\n";
                             }
+
+
+                            // Save number of baskets
+                            file << baskets.size() << "\n";
+                            for (const auto& b : baskets) {
+                                file << b.rect.x << " " << b.rect.y << " " << b.rect.w << " " << b.rect.h << "\n";
+                            }
                             file.close();
                             std::cout << "Level saved to level.txt" << std::endl;
                         }
@@ -289,6 +395,20 @@ int main(int argc, char* argv[]) {
                                 platforms.push_back(p);
                             }
                             file.close();
+
+                            // Load baskets (optional for backward compatibility)
+                            size_t numBaskets = 0;
+                            if (file >> numBaskets) {
+                                baskets.clear();
+                                for (size_t i = 0; i < numBaskets; i++) {
+                                    Basket b;
+                                    file >> b.rect.x >> b.rect.y >> b.rect.w >> b.rect.h;
+                                    baskets.push_back(b);
+                                }
+                            } else {
+                                file.clear();
+                            }
+
                             std::cout << "Level loaded from level.txt" << std::endl;
                         } else {
                             std::cout << "Could not open level.txt" << std::endl;
@@ -389,6 +509,13 @@ int main(int argc, char* argv[]) {
                                 break;
                             }
                         }
+                    }
+                    else if (currentTool == TOOL_BASKET) {
+                        // Add a basket target (snap to grid). Default size: 4x2 grid cells.
+                        Basket b;
+                        b.rect = {snappedX, snappedY, GRID_SIZE * 4, GRID_SIZE * 2};
+                        baskets.push_back(b);
+                        std::cout << "Added basket at (" << snappedX << ", " << snappedY << ")" << std::endl;
                     }
                 }
             }
@@ -682,6 +809,73 @@ int main(int argc, char* argv[]) {
             isGrounded = false;
         }
 
+
+        // Ball physics update (game mode only)
+        if (!editorMode && ball.active) {
+            // Gravity
+            ball.vy += BALL_GRAVITY;
+
+            // Integrate
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            // World bounds (left/right/top)
+            if (ball.x - ball.radius < 0) {
+                ball.x = ball.radius;
+                ball.vx = -ball.vx * BALL_RESTITUTION;
+            }
+            if (ball.x + ball.radius > WORLD_WIDTH) {
+                ball.x = WORLD_WIDTH - ball.radius;
+                ball.vx = -ball.vx * BALL_RESTITUTION;
+            }
+            if (ball.y - ball.radius < 0) {
+                ball.y = ball.radius;
+                ball.vy = -ball.vy * BALL_RESTITUTION;
+            }
+
+            // Collide with ground
+            float ballGroundY = WORLD_HEIGHT - GROUND_HEIGHT - ball.radius;
+            if (ball.y > ballGroundY) {
+                ball.y = ballGroundY;
+                if (ball.vy > 0) ball.vy = -ball.vy * BALL_RESTITUTION;
+                ball.vx *= BALL_FRICTION;
+                if (std::abs(ball.vy) < 0.2f) ball.vy = 0.0f;
+            }
+
+            // Collide with platforms (treat platform as rect)
+            for (const auto& platform : platforms) {
+                // fall-through platforms only matter once you're bouncing (keep existing logic feel)
+                bool shouldCollide = platform.isSolid || (bounceLevel > 0);
+                if (!shouldCollide) continue;
+                resolveCircleRect(ball, platform.rect, BALL_RESTITUTION);
+            }
+
+            // Collide with player (rect)
+            SDL_Rect playerRect = {(int)playerX, (int)playerY, PLAYER_SIZE, PLAYER_SIZE};
+            // Give the ball a bit of extra "kick" based on player horizontal movement
+            float oldVx = ball.vx;
+            if (resolveCircleRect(ball, playerRect, 0.82f)) {
+                float playerDX = playerX - lastPlayerX;
+                ball.vx += playerDX * 0.35f;
+                // stop endless jittering
+                if (std::abs(ball.vx) < 0.02f) ball.vx = 0.0f;
+            }
+
+            // Basket scoring: if ball center enters basket rect, reset ball and print a message.
+            for (const auto& basket : baskets) {
+                if (ball.x >= basket.rect.x && ball.x <= basket.rect.x + basket.rect.w &&
+                    ball.y >= basket.rect.y && ball.y <= basket.rect.y + basket.rect.h) {
+                    std::cout << "SCORE!" << std::endl;
+                    // Reset ball near player
+                    ball.x = playerX + PLAYER_SIZE + 20.0f;
+                    ball.y = playerY + PLAYER_SIZE - 40.0f;
+                    ball.vx = 0.0f;
+                    ball.vy = 0.0f;
+                    break;
+                }
+            }
+        }
+
         // Clear screen with black color
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
@@ -714,6 +908,19 @@ int main(int argc, char* argv[]) {
 
         // Draw platforms
         for (size_t i = 0; i < platforms.size(); i++) {
+
+        // Draw baskets (targets)
+        for (const auto& b : baskets) {
+            SDL_Rect screenRect = {
+                b.rect.x - (int)cameraX,
+                b.rect.y - (int)cameraY,
+                b.rect.w,
+                b.rect.h
+            };
+            SDL_SetRenderDrawColor(renderer, 255, 140, 0, 255); // orange
+            SDL_RenderDrawRect(renderer, &screenRect);
+        }
+
             SDL_Rect screenRect = {
                 platforms[i].rect.x - (int)cameraX,
                 platforms[i].rect.y - (int)cameraY,
@@ -761,18 +968,18 @@ int main(int argc, char* argv[]) {
 
             // Draw UI panel
             SDL_SetRenderDrawColor(renderer, 40, 40, 40, 220);
-            SDL_Rect uiPanel = {10, 10, 280, 180};
+            SDL_Rect uiPanel = {10, 10, 280, 210};
             SDL_RenderFillRect(renderer, &uiPanel);
 
             SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
-            SDL_Rect uiBorder = {10, 10, 280, 180};
+            SDL_Rect uiBorder = {10, 10, 280, 210};
             SDL_RenderDrawRect(renderer, &uiBorder);
 
             // Tool indicators with labels
-            const char* toolNames[] = {"1: Solid Platform", "2: Fall-Through", "3: Start Point", "4: Finish Point", "5: Delete"};
-            int toolColors[][3] = {{200,200,200}, {100,150,255}, {0,255,0}, {255,255,0}, {255,100,100}};
+            const char* toolNames[] = {"1: Solid Platform", "2: Fall-Through", "3: Start Point", "4: Finish Point", "5: Delete", "6: Basket"};
+            int toolColors[][3] = {{200,200,200}, {100,150,255}, {0,255,0}, {255,255,0}, {255,100,100}, {255,160,0}};
 
-            for (int i = 0; i < 5; i++) {
+            for (int i = 0; i < 6; i++) {
                 bool selected = (i == (int)currentTool);
 
                 // Draw colored square indicator
@@ -929,6 +1136,22 @@ int main(int argc, char* argv[]) {
                     int leftX = (int)playerX + 32 + faceOffset - (i * 1.08f) - (int)cameraX;
                     int rightX = (int)playerX + 32 + faceOffset + (i * 1.08f) - (int)cameraX;
                     SDL_RenderDrawLine(renderer, leftX, y, rightX, y);
+                }
+            }
+        }
+
+
+        // Draw ball
+        if (!editorMode && ball.active) {
+            SDL_SetRenderDrawColor(renderer, 220, 70, 30, 255);
+            int cx = (int)(ball.x - cameraX);
+            int cy = (int)(ball.y - cameraY);
+            int r = (int)ball.radius;
+            for (int y = -r; y <= r; y++) {
+                for (int x = -r; x <= r; x++) {
+                    if (x*x + y*y <= r*r) {
+                        SDL_RenderDrawPoint(renderer, cx + x, cy + y);
+                    }
                 }
             }
         }
