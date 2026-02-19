@@ -211,7 +211,7 @@ int main(int argc, char* argv[]) {
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
                     quit = true;
                 }
-                else if (event.key.keysym.sym == SDLK_e) {
+                else if (event.key.keysym.sym == SDLK_p) {
                     editorMode = !editorMode;
                     std::cout << "Editor mode: " << (editorMode ? "ON" : "OFF") << std::endl;
                 }
