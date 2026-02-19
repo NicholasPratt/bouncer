@@ -112,6 +112,7 @@ int main(int argc, char* argv[]) {
     bool spacePressed = false;
     bool spacePressedThisFall = false;
     int faceOffset = 0; // -5 for left, 0 for center, 5 for right
+    int lastFacing = 1;  // -1 left, +1 right (used when idle)
     float lastPlayerX = playerX;
     bool hadSmallRebound = false; // Track if we just did a small rebound
 
@@ -484,7 +485,7 @@ int main(int argc, char* argv[]) {
                             int facing = 0;
                             if (faceOffset < 0) facing = -1;
                             else if (faceOffset > 0) facing = 1;
-                            else facing = 1; // default to right
+                            else facing = lastFacing;
 
                             float e = (float)ball.energy;
                             // Map energy to a shot horizontal speed:
@@ -612,6 +613,7 @@ int main(int argc, char* argv[]) {
             playerX -= MOVE_SPEED;
             if (playerX < 0) playerX = 0;
             faceOffset = -5; // Look left
+            lastFacing = -1;
         }
         else if (keystate[SDL_SCANCODE_RIGHT] || keystate[SDL_SCANCODE_D]) {
             playerX += MOVE_SPEED;
@@ -619,6 +621,7 @@ int main(int argc, char* argv[]) {
                 playerX = WORLD_WIDTH - PLAYER_SIZE;
             }
             faceOffset = 5; // Look right
+            lastFacing = 1;
         }
         else {
             faceOffset = 0; // Look center
@@ -970,6 +973,7 @@ int main(int argc, char* argv[]) {
             else if (faceOffset > 0) facing = 1;
             else if (playerDX < -0.01f) facing = -1;
             else if (playerDX > 0.01f) facing = 1;
+            else facing = lastFacing;
 
             bool hitPlayer = resolveCircleRect(ball, playerRect, 0.82f);
             if (hitPlayer) {
