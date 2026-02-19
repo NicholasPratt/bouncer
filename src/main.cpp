@@ -923,11 +923,16 @@ int main(int argc, char* argv[]) {
 
             // Basketball: keep sideways motion heavily damped, but do NOT glue it to the player.
             // The player can only affect sideways motion when actually touching the ball.
-            if (ball.kind == BALL_BASKETBALL && !ball.shooting) {
+            if (ball.shooting) {
+                // No air drag during a shot: keep a clean parabolic arc.
+            }
+            else if (ball.kind == BALL_BASKETBALL) {
+                // Basketball: heavier sideways damping during normal play
                 ball.vx *= 0.90f;
                 if (std::abs(ball.vx) < 0.01f) ball.vx = 0.0f;
-            } else {
-                // Sideways damping (keeps the game feeling more "vertical")
+            }
+            else {
+                // Soccer/normal: light air drag
                 ball.vx *= BALL_AIR_DRAG;
                 if (std::abs(ball.vx) < 0.001f) ball.vx = 0.0f;
             }
