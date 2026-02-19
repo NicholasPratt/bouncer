@@ -124,16 +124,31 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Load ground texture
-    groundTexture = IMG_LoadTexture(renderer, "/Users/nicholas/Documents/code/claude1/assets/ground.png");
+    // Load ground texture (use project-relative path)
+    groundTexture = IMG_LoadTexture(renderer, "assets/ground.png");
     if (groundTexture == nullptr) {
-        std::cerr << "Failed to load ground texture! IMG_Error: " << IMG_GetError() << std::endl;
+        std::cerr << "Failed to load ground texture (assets/ground.png)! IMG_Error: " << IMG_GetError() << std::endl;
     }
 
-    // Load font - using system font
-    TTF_Font* font = TTF_OpenFont("/System/Library/Fonts/Helvetica.ttc", 14);
+    // Load font
+    // Prefer a common Linux system font, but allow falling back to a bundled font in assets/fonts/.
+    TTF_Font* font = nullptr;
+    const char* fontCandidates[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", // common on Debian/Ubuntu/Mint
+        "assets/fonts/DejaVuSans.ttf",
+        "assets/fonts/font.ttf"
+    };
+
+    for (const char* path : fontCandidates) {
+        font = TTF_OpenFont(path, 14);
+        if (font) {
+            std::cout << "Loaded font: " << path << std::endl;
+            break;
+        }
+    }
+
     if (font == nullptr) {
-        std::cerr << "Failed to load font! TTF_Error: " << TTF_GetError() << std::endl;
+        std::cerr << "Failed to load font from any known location! TTF_Error: " << TTF_GetError() << std::endl;
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
         if (groundTexture) {

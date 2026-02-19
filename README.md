@@ -18,14 +18,23 @@ A C++ game project using SDL2.
 
 - CMake (3.10 or higher)
 - SDL2
+- SDL2_image
+- SDL2_ttf
 - C++17 compatible compiler
 
 ## Building
 
 ```bash
+mkdir -p build
 cd build
 cmake ..
 cmake --build .
+```
+
+### Ubuntu/Mint packages
+
+```bash
+sudo apt install -y build-essential cmake libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
 ```
 
 ## Running
