@@ -927,9 +927,14 @@ int main(int argc, char* argv[]) {
                 // No air drag during a shot: keep a clean parabolic arc.
             }
             else if (ball.kind == BALL_BASKETBALL) {
-                // Basketball: heavier sideways damping during normal play
-                ball.vx *= 0.90f;
-                if (std::abs(ball.vx) < 0.01f) ball.vx = 0.0f;
+                // Basketball: sideways damping, but capped so it never feels "thicker" than gravity.
+                // i.e. per-frame horizontal slowdown <= BALL_GRAVITY.
+                float damp = BALL_GRAVITY;
+                if (std::abs(ball.vx) <= damp) {
+                    ball.vx = 0.0f;
+                } else {
+                    ball.vx -= (ball.vx > 0.0f ? damp : -damp);
+                }
             }
             else {
                 // Soccer/normal: light air drag
