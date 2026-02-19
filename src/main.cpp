@@ -929,7 +929,7 @@ int main(int argc, char* argv[]) {
             else if (ball.kind == BALL_BASKETBALL) {
                 // Basketball: sideways damping, but capped so it never feels "thicker" than gravity.
                 // i.e. per-frame horizontal slowdown <= BALL_GRAVITY.
-                float damp = BALL_GRAVITY;
+                float damp = BALL_GRAVITY / 3.0f;
                 if (std::abs(ball.vx) <= damp) {
                     ball.vx = 0.0f;
                 } else {
