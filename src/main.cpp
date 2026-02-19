@@ -55,9 +55,14 @@ const float BALL_RESTITUTION = 0.72f;   // bounce strength
 const float BALL_FRICTION_GROUND = 0.92f; // strong sideways damping when touching ground
 const float BALL_AIR_DRAG = 0.995f;       // gentle sideways damping in air
 
-// Player->ball "paddle" effect (Pong/Arkanoid-ish)
-const float BALL_PADDLE_X = 8.5f;        // how much side impulse you get from edge hits
-const float BALL_PADDLE_MIN_UP = 6.5f;   // minimum upward bounce speed when hit by player
+// Player->ball interaction
+const float BALL_PADDLE_MIN_UP = 6.5f;    // minimum upward bounce speed when hit by player
+const float BALL_DRIBBLE_SPEED = 7.0f;    // horizontal speed imparted when dribbling forward
+const float BALL_NEAR_BOUNCE_GAP = 10.0f; // "bounce next to" distance (px gap from ball to player)
+
+// Safety clamps (prevents ball from rocketing off-screen)
+const float BALL_MAX_VX = 14.0f;
+const float BALL_MAX_VY = 26.0f;
 
 const float DOWNWARD_FORCE = 3.0f;   // Force added when pressing space while falling
 const float BOUNCE_LEVEL0 = -3.0f;   // Small rebound when failed
@@ -824,6 +829,10 @@ int main(int argc, char* argv[]) {
             ball.vx *= BALL_AIR_DRAG;
             if (std::abs(ball.vx) < 0.001f) ball.vx = 0.0f;
 
+            // Clamp speeds
+            ball.vx = clampf(ball.vx, -BALL_MAX_VX, BALL_MAX_VX);
+            ball.vy = clampf(ball.vy, -BALL_MAX_VY, BALL_MAX_VY);
+
             // Integrate
             ball.x += ball.vx;
             ball.y += ball.vy;
@@ -861,20 +870,55 @@ int main(int argc, char* argv[]) {
 
             // Collide with player (rect)
             SDL_Rect playerRect = {(int)playerX, (int)playerY, PLAYER_SIZE, PLAYER_SIZE};
-            if (resolveCircleRect(ball, playerRect, 0.82f)) {
-                // Arkanoid/Pong style: where you hit the ball changes its horizontal angle.
-                float playerCenterX = playerX + PLAYER_SIZE * 0.5f;
+            float playerCenterX = playerX + PLAYER_SIZE * 0.5f;
+            float playerDX = playerX - lastPlayerX;
+
+            // Player facing: use faceOffset (-5 left, +5 right, 0 idle)
+            int facing = 0;
+            if (faceOffset < 0) facing = -1;
+            else if (faceOffset > 0) facing = 1;
+            else if (playerDX < -0.01f) facing = -1;
+            else if (playerDX > 0.01f) facing = 1;
+
+            bool hitPlayer = resolveCircleRect(ball, playerRect, 0.82f);
+            if (hitPlayer) {
+                // Contact-only behavior:
+                // - Ball always pops upward
+                // - Horizontal "dribble" only happens if the ball is on the facing side.
                 float offset = (ball.x - playerCenterX) / (PLAYER_SIZE * 0.5f); // -1..+1
                 offset = clampf(offset, -1.0f, 1.0f);
 
-                // Side impulse based on hit offset, plus a bit from player movement
-                float playerDX = playerX - lastPlayerX;
-                ball.vx = offset * BALL_PADDLE_X + playerDX * 0.55f;
-
-                // Ensure the collision gives an upward bounce (feels like dribbling / volleying)
+                // Upward bounce, preserving some incoming energy
                 float up = std::max(BALL_PADDLE_MIN_UP, std::abs(ball.vy));
                 ball.vy = -up;
+
+                // Dribble forward only if ball is on facing side (like needing to be on the correct side)
+                if (facing != 0 && (offset * (float)facing) > 0.15f) {
+                    ball.vx = (float)facing * (BALL_DRIBBLE_SPEED * std::abs(offset)) + playerDX * 0.4f;
+                } else {
+                    // Otherwise: straight up/down feel
+                    ball.vx = 0.0f;
+                }
+            } else {
+                // "Bounce next to" (within BALL_NEAR_BOUNCE_GAP px of contact) when the player bounces this frame.
+                // Detect distance from ball to player rect.
+                float closestX = clampf(ball.x, (float)playerRect.x, (float)(playerRect.x + playerRect.w));
+                float closestY = clampf(ball.y, (float)playerRect.y, (float)(playerRect.y + playerRect.h));
+                float dx = ball.x - closestX;
+                float dy = ball.y - closestY;
+                float dist = std::sqrt(dx*dx + dy*dy);
+                float gap = dist - ball.radius;
+
+                if (bouncedThisFrame && gap > 0.0f && gap <= BALL_NEAR_BOUNCE_GAP) {
+                    ball.vx = 0.0f;
+                    float up = std::max(BALL_PADDLE_MIN_UP, std::abs(ball.vy));
+                    ball.vy = -up;
+                }
             }
+
+            // Final clamp after interactions
+            ball.vx = clampf(ball.vx, -BALL_MAX_VX, BALL_MAX_VX);
+            ball.vy = clampf(ball.vy, -BALL_MAX_VY, BALL_MAX_VY);
 
             // Basket scoring: if ball center enters basket rect, reset ball and print a message.
             for (const auto& basket : baskets) {
